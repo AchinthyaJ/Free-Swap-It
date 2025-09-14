@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Text Replacer</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Inter", "Segoe UI", sans-serif;
+      width: 280px;
+      background: rgba(255,255,255,0.85);
+      backdrop-filter: blur(10px);
+      padding: 16px;
+      box-sizing: border-box;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+      color: #222;
+    }
+    #start-btn {
+      width: 100%;
+      padding: 12px;
+      border: none;
+      border-radius: 8px;
+      background: #4cafef;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-bottom: 16px;
+      transition: background 0.2s ease, transform 0.1s ease;
+    }
+    #start-btn:hover { background: #2196f3; }
+    #start-btn:active { transform: scale(0.97); }
+
+    #list {
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .rule {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #f9f9f9;
+      border: 1px solid #eee;
+      padding: 6px 8px;
+      border-radius: 6px;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+    .rule span {
+      flex: 1;
+      margin-right: 8px;
+    }
+    .delete-btn {
+      background: #e53935;
+      border: none;
+      color: #fff;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 12px;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+    .delete-btn:hover { background: #c62828; }
+  </style>
+</head>
+<body>
+  <h2>Free Swap-It</h2>
+  <button id="start-btn">✨ Start Replacing(Still has bugs)</button>
+  <div id="status-message" style="margin:8px 0 12px;font-size:13px;color:#2ecc71"></div>
+  <div id="replacements-list"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
