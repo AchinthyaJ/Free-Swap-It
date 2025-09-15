@@ -40,6 +40,28 @@
   }
   function escapeRegExp(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 
+  function getCssSelector(el) {
+    if (!(el instanceof Element)) return;
+    const path = [];
+    while (el.nodeType === Node.ELEMENT_NODE) {
+      let selector = el.nodeName.toLowerCase();
+      if (el.id) {
+        selector += '#' + el.id.replace(/(:|\.|\[|\]|,|=)/g, '\\$1');
+        path.unshift(selector);
+        break; // ID is unique
+      } else {
+        let sib = el, nth = 1;
+        while (sib = sib.previousElementSibling) {
+          if (sib.nodeName.toLowerCase() === selector) nth++;
+        }
+        if (nth !== 1) selector += `:nth-of-type(${nth})`;
+      }
+      path.unshift(selector);
+      el = el.parentNode;
+    }
+    return path.join(" > ");
+  }
+
   /* ---------------- highlight box ---------------- */
   function createHighlightBox() {
     if (highlightEl) return;
@@ -124,7 +146,8 @@
     if (!el) return;
     const text = (window.getSelection().toString().trim() || el.innerText || "").trim();
     if (!text) return;
-    openModal(text);
+    const selector = getCssSelector(el);
+    openModal(text, selector);
   }
   function onKeyDown(e) {
     if (e.key === "Escape") stopSelectionMode();
@@ -182,7 +205,7 @@
   }
   function closeModal() { if (modalEl) { modalEl.remove(); modalEl = null; } }
 
-  function openModal(token) {
+  function openModal(token, selector) {
     createModal();
     modalEl.innerHTML = `
       <h2 style="margin:0 0 10px;font-size:18px;">Replace Text</h2>
@@ -201,17 +224,17 @@
       <div id="tr-saved" style="font-size:13px;color:#333">Saved replacements:</div>
     `;
 
-    modalEl.querySelector("#tr-preview").onclick = () => previewMatches(token);
-    modalEl.querySelector("#tr-apply").onclick = () => applyReplacement(token);
+    modalEl.querySelector("#tr-preview").onclick = () => previewMatches(token, selector);
+    modalEl.querySelector("#tr-apply").onclick = () => applyReplacement(token, selector);
     modalEl.querySelector("#tr-undo").onclick = () => undoLast();
     modalEl.querySelector("#tr-done").onclick = () => { closeModal(); stopSelectionMode(); };
     renderSaved();
   }
 
   /* ---------------- replacements ---------------- */
-  function previewMatches(token) {
+  function previewMatches(token, selector) {
     clearPreviewOverlays();
-    const matches = findMatches(token);
+    const matches = findMatches(token, selector);
     matches.forEach(m => m.rects.forEach(r => {
       const o = document.createElement("div");
       Object.assign(o.style, {
@@ -244,18 +267,24 @@
   }
   function clearPreviewOverlays() { previewOverlays.forEach(o => o.remove()); previewOverlays = []; }
 
-  function applyReplacement(token) {
+  function applyReplacement(token, selector) {
     clearPreviewOverlays();
     const replacement = modalEl.querySelector("#tr-input").value.trim();
     if (!replacement) return;
-    const matches = findMatches(token);
+    const matches = findMatches(token, selector);
     lastSnapshot = matches.map(m => ({ node: m.node, old: m.node.nodeValue }));
     matches.forEach(m => {
       m.node.nodeValue = m.node.nodeValue.replace(new RegExp(escapeRegExp(token), "gi"), replacement);
     });
-    const idx = rules.findIndex(r => r.original === token);
-    if (idx >= 0) rules[idx].replacement = replacement;
-    else rules.push({ original: token, replacement });
+    const newRule = {
+      original: token,
+      replacement,
+      hostname: window.location.hostname,
+      selector
+    };
+    const idx = rules.findIndex(r => r.hostname === newRule.hostname && r.selector === newRule.selector && r.original === newRule.original);
+    if (idx >= 0) rules[idx] = newRule;
+    else rules.push(newRule);
     saveRules(() => renderSaved());
   }
   function undoLast() {
@@ -268,9 +297,10 @@
     const div = modalEl.querySelector("#tr-saved");
     div.innerHTML = "<b>Saved replacements:</b><br>";
     if (!rules.length) { div.innerHTML += "None yet."; return; }
-    rules.forEach((r,i) => {
+    const pageRules = rules.filter(r => r.hostname === window.location.hostname);
+    pageRules.forEach((r,i) => {
       const row = document.createElement("div");
-      row.textContent = `"${r.original}" → "${r.replacement}" `;
+      row.textContent = `"${r.original}" → "${r.replacement}" (on this page)`;
       const del = document.createElement("button");
       del.textContent = "×";
       del.className = "tr-btn tr-red";
@@ -281,15 +311,22 @@
     });
   }
 
-  function findMatches(token) {
+  function findMatches(token, selector) {
     const out = [];
     const re = new RegExp(escapeRegExp(token), "gi");
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    let rootElement = document.body;
+    if (selector) {
+      try {
+        rootElement = document.querySelector(selector) || document.body;
+      } catch (e) { console.error("TextReplacer: Invalid selector", selector); }
+    }
+
+    const walker = document.createTreeWalker(rootElement, NodeFilter.SHOW_TEXT, {
       acceptNode(n) {
         if (!n.nodeValue) return NodeFilter.FILTER_REJECT;
         const p = n.parentNode;
         if (!p) return NodeFilter.FILTER_REJECT;
-        if (modalEl && modalEl.contains(p)) return NodeFilter.FILTER_REJECT;
+        if ((modalEl && modalEl.contains(p)) || (highlightEl && highlightEl.contains(p))) return NodeFilter.FILTER_REJECT;
         if (isIgnoredElement(p) || !isVisibleElement(p)) return NodeFilter.FILTER_REJECT;
         return NodeFilter.FILTER_ACCEPT;
       }
@@ -309,25 +346,32 @@
 
   /* ---------------- auto-apply saved rules ---------------- */
   function applyAllRules(root=document.body) {
-    if (!rules.length) return;
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
-      acceptNode(n) {
-        if (!n.nodeValue) return NodeFilter.FILTER_REJECT;
-        const p = n.parentNode;
-        if (!p) return NodeFilter.FILTER_REJECT;
-        if (isIgnoredElement(p) || !isVisibleElement(p)) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      }
-    });
-    let n;
-    while ((n = walker.nextNode())) {
-      rules.forEach(r => {
+    const pageRules = rules.filter(r => r.hostname === window.location.hostname);
+    if (!pageRules.length) return;
+
+    pageRules.forEach(r => {
+      let targetElement;
+      try {
+        targetElement = root.matches(r.selector) ? root : root.querySelector(r.selector);
+      } catch (e) { return; } // Invalid selector
+
+      if (!targetElement) return;
+
+      const walker = document.createTreeWalker(targetElement, NodeFilter.SHOW_TEXT, {
+        acceptNode(n) {
+          if (!n.nodeValue || !n.parentNode || isIgnoredElement(n.parentNode)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        }
+      });
+
+      let n;
+      while ((n = walker.nextNode())) {
         const re = new RegExp(escapeRegExp(r.original), "gi");
         if (re.test(n.nodeValue)) {
           n.nodeValue = n.nodeValue.replace(re, r.replacement);
         }
-      });
-    }
+      }
+    });
   }
   function observeDOM() {
     const obs = new MutationObserver(muts => {
